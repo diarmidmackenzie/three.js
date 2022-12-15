@@ -25,6 +25,100 @@ const _zAxis = /*@__PURE__*/ new Vector3( 0, 0, 1 );
 const _addedEvent = { type: 'added' };
 const _removedEvent = { type: 'removed' };
 
+class Object3DMatrixData {
+
+	constructor() {
+
+		this.matrix = new Matrix4();
+		this.matrixWorld = new Matrix4();
+
+		this.matrixAutoUpdate = Object3D.DefaultMatrixAutoUpdate;
+		this.matrixWorldNeedsUpdate = false;
+
+		this.matrixWorldAutoUpdate = Object3D.DefaultMatrixWorldAutoUpdate; // checked by the renderer
+
+		this.parent = null;
+		this.children = [];
+
+		this.position = new Vector3();
+		this.quaternion = new Quaternion();
+		this.scale = new Vector3( 1, 1, 1 );
+
+	}
+
+	addChild( child ) {
+
+		child.parent = this;
+		this.children.push( child );
+
+	}
+
+	removeChild( child ) {
+
+		const index = this.children.indexOf( child );
+
+		if ( index !== - 1 ) {
+
+			this.children.splice( index, 1 );
+
+		}
+
+	}
+
+	updateMatrix() {
+
+		this.matrix.compose( this.position, this.quaternion, this.scale );
+
+		this.matrixWorldNeedsUpdate = true;
+
+	}
+
+	updateMatrixWorld( force ) {
+
+		if ( this.updateMatrixWorldBefore ) this.updateMatrixWorldBefore( force );
+
+		if ( this.matrixAutoUpdate ) this.updateMatrix();
+
+		if ( this.matrixWorldNeedsUpdate || force ) {
+
+			if ( this.parent === null ) {
+
+				this.matrixWorld.copy( this.matrix );
+
+			} else {
+
+				this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
+
+			}
+
+			this.matrixWorldNeedsUpdate = false;
+
+			force = true;
+
+		}
+
+		// update Children
+
+		const children = this.children;
+
+		for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+			const child = children[ i ];
+
+			if ( child.matrixWorldAutoUpdate === true || force === true ) {
+
+				child.updateMatrixWorld( force );
+
+			}
+
+		}
+
+		if ( this.updateMatrixWorldAfter ) this.updateMatrixWorldAfter( force );
+
+	}
+
+}
+
 class Object3D extends EventDispatcher {
 
 	constructor() {
@@ -45,10 +139,13 @@ class Object3D extends EventDispatcher {
 
 		this.up = Object3D.DefaultUp.clone();
 
-		const position = new Vector3();
+		this.privateMatrixData = new Object3DMatrixData();
+		this.matrixData = this.privateMatrixData;
+
+		const position = this.matrixData.position;
 		const rotation = new Euler();
-		const quaternion = new Quaternion();
-		const scale = new Vector3( 1, 1, 1 );
+		const quaternion = this.matrixData.quaternion;
+		const scale = this.matrixData.scale;
 
 		function onRotationChange() {
 
@@ -94,13 +191,8 @@ class Object3D extends EventDispatcher {
 			}
 		} );
 
-		this.matrix = new Matrix4();
-		this.matrixWorld = new Matrix4();
-
-		this.matrixAutoUpdate = Object3D.DefaultMatrixAutoUpdate;
-		this.matrixWorldNeedsUpdate = false;
-
-		this.matrixWorldAutoUpdate = Object3D.DefaultMatrixWorldAutoUpdate; // checked by the renderer
+		this.matrix = this.matrixData.matrix;
+		this.matrixWorld = this.matrixData.matrixWorld;
 
 		this.layers = new Layers();
 		this.visible = true;
@@ -114,6 +206,113 @@ class Object3D extends EventDispatcher {
 		this.animations = [];
 
 		this.userData = {};
+
+	}
+
+	set matrixAutoUpdate( value ) {
+
+		this.matrixData.matrixAutoUpdate = value;
+
+	}
+
+	get matrixAutoUpdate() {
+
+		return this.matrixData.matrixAutoUpdate;
+
+	}
+
+	set matrixWorldNeedsUpdate( value ) {
+
+		this.matrixData.matrixWorldNeedsUpdate = value;
+
+	}
+
+	get matrixWorldNeedsUpdate() {
+
+		return this.matrixData.matrixWorldNeedsUpdate;
+
+	}
+
+	set matrixWorldAutoUpdate( value ) {
+
+		this.matrixData.matrixWorldAutoUpdate = value;
+
+	}
+
+	get matrixWorldAutoUpdate() {
+
+		return this.matrixData.matrixWorldAutoUpdate;
+
+	}
+
+	_updateMatrixDataReferences() {
+
+		this.matrix = this.matrixData.matrix;
+		this.matrixWorld = this.matrixData.matrixWorld;
+		this.position = this.matrixData.position;
+		this.quaternion = this.matrixData.quaternion;
+		this.scale = this.matrixData.scale;
+
+	}
+
+	shareParentMatrix() {
+
+		this.matrixData = this.parent.matrixData;
+
+		this._updateMatrixDataReferences();
+
+		// Transfer children's matrices into parent matrix data.
+		// Don't worry about ordering, as it's not possible to guarantee preveration of
+		// matching ordering.
+
+		const children = this.privateMatrixData.children;
+
+		for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+			const child = children[ i ];
+
+			this.matrixData.addChild( child );
+
+		}
+
+		// privateMatrixData retains a list of children to re-instate when restoring private matrix.
+		// This list is maintained as further children are added / removed & as matrix sharing occurs
+		// as this avoids us ever having to perform a full analysis of the entire descendent scene graph.
+		// !! TO DO
+		// There are lots of cases here to consider & the current code probably has some bug / limitations
+		// Lots of Unit Testing of this is needed.
+
+	}
+
+	restorePrivateMatrix() {
+
+		this.matrixData = this.privateMatrixData;
+
+		this._updateMatrixDataReferences();
+
+		// Remove children's matrices from the parent matrix data.
+		// privateMatrixData is maintained as an up-to-date maintained list of the set of children to move.
+		const children = this.privateMatrixData.children;
+
+		for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+			const child = children[ i ];
+
+			this.parent.matrixData.removeChild( child );
+
+		}
+
+	}
+
+	setUpdateMatrixWorldAfter( after ) {
+
+		this.matrixData.updateMatrixWorldAfter = after.bind( this );
+
+	}
+
+	setUpdateMatrixWorldBefore( before ) {
+
+		this.matrixData.updateMatrixWorldBefore = before.bind( this );
 
 	}
 
@@ -247,11 +446,15 @@ class Object3D extends EventDispatcher {
 
 	localToWorld( vector ) {
 
+		this.updateWorldMatrix( true, false );
+
 		return vector.applyMatrix4( this.matrixWorld );
 
 	}
 
 	worldToLocal( vector ) {
+
+		this.updateWorldMatrix( true, false );
 
 		return vector.applyMatrix4( _m1.copy( this.matrixWorld ).invert() );
 
@@ -330,6 +533,13 @@ class Object3D extends EventDispatcher {
 
 			object.parent = this;
 			this.children.push( object );
+			this.matrixData.addChild( object.matrixData );
+
+			if ( this.matrixData !== this.privateMatrixData ) {
+
+				this.privateMatrixData.addChild( object.matrixData );
+
+			}
 
 			object.dispatchEvent( _addedEvent );
 
@@ -363,6 +573,16 @@ class Object3D extends EventDispatcher {
 
 			object.parent = null;
 			this.children.splice( index, 1 );
+
+			// remove all traces of object matrices from our matrixData (whether shared or private)
+			this.matrixData.removeChild( object.matrixData );
+			this.matrixData.removeChild( object.privateMatrixData );
+			if ( this.matrixData !== this.privateMatrixData ) {
+
+				this.privateMatrixData.removeChild( object.matrixData );
+			  this.privateMatrixData.removeChild( object.privateMatrixData );
+
+			}
 
 			object.dispatchEvent( _removedEvent );
 
@@ -399,6 +619,8 @@ class Object3D extends EventDispatcher {
 		}
 
 		this.children.length = 0;
+		this.matrixData.children.length = 0;
+		this.privateMatrixData.children.length = 0;
 
 		return this;
 
@@ -560,41 +782,7 @@ class Object3D extends EventDispatcher {
 
 	updateMatrixWorld( force ) {
 
-		if ( this.matrixAutoUpdate ) this.updateMatrix();
-
-		if ( this.matrixWorldNeedsUpdate || force ) {
-
-			if ( this.parent === null ) {
-
-				this.matrixWorld.copy( this.matrix );
-
-			} else {
-
-				this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
-
-			}
-
-			this.matrixWorldNeedsUpdate = false;
-
-			force = true;
-
-		}
-
-		// update children
-
-		const children = this.children;
-
-		for ( let i = 0, l = children.length; i < l; i ++ ) {
-
-			const child = children[ i ];
-
-			if ( child.matrixWorldAutoUpdate === true || force === true ) {
-
-				child.updateMatrixWorld( force );
-
-			}
-
-		}
+		this.matrixData.updateMatrixWorld( force );
 
 	}
 
@@ -687,7 +875,7 @@ class Object3D extends EventDispatcher {
 		if ( this.visible === false ) object.visible = false;
 		if ( this.frustumCulled === false ) object.frustumCulled = false;
 		if ( this.renderOrder !== 0 ) object.renderOrder = this.renderOrder;
-		if ( JSON.stringify( this.userData ) !== '{}' ) object.userData = this.userData;
+		if ( Object.keys( this.userData ).length > 0 ) object.userData = this.userData;
 
 		object.layers = this.layers.mask;
 		object.matrix = this.matrix.toArray();
@@ -942,3 +1130,4 @@ Object3D.DefaultMatrixAutoUpdate = true;
 Object3D.DefaultMatrixWorldAutoUpdate = true;
 
 export { Object3D };
+

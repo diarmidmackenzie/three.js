@@ -56,10 +56,11 @@ class SkeletonHelper extends LineSegments {
 
 		this.matrix = object.matrixWorld;
 		this.matrixAutoUpdate = false;
+		this.setUpdateMatrixWorldBefore( this.updateMatrixWorldBefore );
 
 	}
 
-	updateMatrixWorld( force ) {
+	updateMatrixWorldBefore() {
 
 		const bones = this.bones;
 
@@ -90,7 +91,12 @@ class SkeletonHelper extends LineSegments {
 
 		geometry.getAttribute( 'position' ).needsUpdate = true;
 
-		super.updateMatrixWorld( force );
+	}
+
+	dispose() {
+
+		this.geometry.dispose();
+		this.material.dispose();
 
 	}
 

@@ -35,7 +35,7 @@ class PlaneHelper extends Line {
 
 	}
 
-	updateMatrixWorld( force ) {
+	updateMatrixWorldBefore() {
 
 		this.position.set( 0, 0, 0 );
 
@@ -44,8 +44,16 @@ class PlaneHelper extends Line {
 		this.lookAt( this.plane.normal );
 
 		this.translateZ( - this.plane.constant );
+		this.setUpdateMatrixWorldBefore( this.updateMatrixWorldBefore );
 
-		super.updateMatrixWorld( force );
+	}
+
+	dispose() {
+
+		this.geometry.dispose();
+		this.material.dispose();
+		this.children[ 0 ].geometry.dispose();
+		this.children[ 0 ].material.dispose();
 
 	}
 

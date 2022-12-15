@@ -1252,6 +1252,7 @@ class MMDPhysicsHelper extends Object3D {
 
 		this.matrix.copy( mesh.matrixWorld );
 		this.matrixAutoUpdate = false;
+    this.setUpdateMatrixWorldBefore( this.updateMatrixWorldBefore );
 
 		this.materials = [];
 
@@ -1292,10 +1293,35 @@ class MMDPhysicsHelper extends Object3D {
 
 	}
 
+
+	/**
+	 * Frees the GPU-related resources allocated by this instance. Call this method whenever this instance is no longer used in your app.
+	 */
+	dispose() {
+
+		const materials = this.materials;
+		const children = this.children;
+
+		for ( let i = 0; i < materials.length; i ++ ) {
+
+			materials[ i ].dispose();
+
+		}
+
+		for ( let i = 0; i < children.length; i ++ ) {
+
+			const child = children[ i ];
+
+			if ( child.isMesh ) child.geometry.dispose();
+
+		}
+
+	}
+
 	/**
 	 * Updates Rigid Bodies visualization.
 	 */
-	updateMatrixWorld( force ) {
+	updateMatrixWorldBefore( force ) {
 
 		var mesh = this.root;
 
@@ -1336,8 +1362,6 @@ class MMDPhysicsHelper extends Object3D {
 			.copy( mesh.matrixWorld )
 			.decompose( _position, _quaternion, _scale )
 			.compose( _position, _quaternion, _scale.set( 1, 1, 1 ) );
-
-		super.updateMatrixWorld( force );
 
 	}
 
