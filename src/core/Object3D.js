@@ -25,6 +25,104 @@ const _zAxis = new Vector3( 0, 0, 1 );
 const _addedEvent = { type: 'added' };
 const _removedEvent = { type: 'removed' };
 
+class Object3DMatrixData {
+
+	constructor() {
+
+		this.matrix = new Matrix4();
+		this.matrixWorld = new Matrix4();
+
+		this.matrixAutoUpdate = Object3D.DefaultMatrixAutoUpdate;
+		this.matrixWorldNeedsUpdate = false;
+
+		this.matrixWorldAutoUpdate = Object3D.DefaultMatrixWorldAutoUpdate; // checked by the renderer
+
+		this.parent = null;
+		this.children = [];
+
+		this.position = new Vector3();
+		this.quaternion = new Quaternion();
+		this.scale = new Vector3( 1, 1, 1 );
+
+	}
+
+	addChild( child ) {
+
+		child.parent = this;
+		this.children.push( child );
+
+	}
+
+	removeChild( child ) {
+
+		const index = this.children.indexOf( child );
+
+		if ( index !== - 1 ) {
+
+			this.children.splice( index, 1 );
+
+			return true;
+
+		}
+
+		return false;
+
+	}
+
+	updateMatrix() {
+
+		this.matrix.compose( this.position, this.quaternion, this.scale );
+
+		this.matrixWorldNeedsUpdate = true;
+
+	}
+
+	updateMatrixWorld( force ) {
+
+		if ( this.updateMatrixWorldBefore ) this.updateMatrixWorldBefore( force );
+
+		if ( this.matrixAutoUpdate ) this.updateMatrix();
+
+		if ( this.matrixWorldNeedsUpdate || force ) {
+
+			if ( this.parent === null ) {
+
+				this.matrixWorld.copy( this.matrix );
+
+			} else {
+
+				this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
+
+			}
+
+			this.matrixWorldNeedsUpdate = false;
+
+			force = true;
+
+		}
+
+		// update Children
+
+		const children = this.children;
+
+		for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+			const child = children[ i ];
+
+			if ( child.matrixWorldAutoUpdate === true || force === true ) {
+
+				child.updateMatrixWorld( force );
+
+			}
+
+		}
+
+		if ( this.updateMatrixWorldAfter ) this.updateMatrixWorldAfter( force );
+
+	}
+
+}
+
 function Object3D() {
 
 	Object.defineProperty( this, 'id', { value: _object3DId ++ } );
@@ -39,10 +137,13 @@ function Object3D() {
 
 	this.up = Object3D.DefaultUp.clone();
 
-	const position = new Vector3();
+	this.privateMatrixData = new Object3DMatrixData();
+	this.matrixData = this.privateMatrixData;
+
+	const position = this.matrixData.position;
 	const rotation = new Euler();
-	const quaternion = new Quaternion();
-	const scale = new Vector3( 1, 1, 1 );
+	const quaternion = this.matrixData.quaternion;
+	const scale = this.matrixData.scale;
 
 	function onRotationChange() {
 
@@ -85,14 +186,37 @@ function Object3D() {
 		},
 		normalMatrix: {
 			value: new Matrix3()
+		},
+		matrixAutoUpdate: {
+			set: function( value ) {
+				this.matrixData.matrixAutoUpdate = value;
+			},
+			get: function () {
+				return this.matrixData.matrixAutoUpdate;
+			}
+		},
+		matrixWorldNeedsUpdate: {
+			set: function( value ) {
+				this.matrixData.matrixWorldNeedsUpdate = value;
+			},
+			get: function () {
+				return this.matrixData.matrixWorldNeedsUpdate;
+			}
+		},
+		matrixWorldAutoUpdate : {
+			set: function( value ) {
+				this.matrixData.matrixWorldAutoUpdate = value;
+			},
+			get: function() {
+				return this.matrixData.matrixWorldAutoUpdate;
+			}
+
 		}
+
 	} );
 
-	this.matrix = new Matrix4();
-	this.matrixWorld = new Matrix4();
-
-	this.matrixAutoUpdate = Object3D.DefaultMatrixAutoUpdate;
-	this.matrixWorldNeedsUpdate = false;
+	this.matrix = this.matrixData.matrix;
+	this.matrixWorld = this.matrixData.matrixWorld;
 
 	this.layers = new Layers();
 	this.visible = true;
@@ -117,6 +241,112 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 	constructor: Object3D,
 
 	isObject3D: true,
+
+	_updateMatrixDataReferences() {
+
+		this.matrix = this.matrixData.matrix;
+		this.matrixWorld = this.matrixData.matrixWorld;
+
+		// No updates to position / scale / quaternion - these
+		// continue to refer to the private Matrix.
+		// Not an issue as they shouldn't be accessed in any case...
+		// Doing differently would require them to no longer be
+		// set up as read-only properties.
+
+	},
+
+	shareParentMatrix() {
+
+		this.matrixData = this.parent.matrixData;
+
+		this._updateMatrixDataReferences();
+
+		// Remove this child from parent matrix data.
+		this.matrixData.removeChild( this.privateMatrixData );
+
+		// Transfer children's matrices into parent matrix data.
+		// Don't worry about ordering, as it's not possible to guarantee preveration of
+		// matching ordering.
+
+		const children = this.privateMatrixData.children;
+
+		for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+			const child = children[ i ];
+
+			this.matrixData.addChild( child );
+
+		}
+
+		// Don't attempt to keep track of children in private Matrix data.
+		// We reconstruct this correctly when we restore the private Matrix.
+		this.privateMatrixData.children.length = 0;
+
+	},
+
+	restorePrivateMatrix() {
+
+		this.matrixData = this.privateMatrixData;
+
+		this._updateMatrixDataReferences();
+
+		// Remove children's matrices from the parent matrix data.
+		// We need to worry about our own children, and also potentially grandchildren as
+		// well in the case of multi-generational merges...
+		const oldParent = this.parent;
+
+		function findNonMergedNode( node ) {
+
+			if ( node.matrixData === node.privateMatrixData ) {
+
+				// found non-merged node.
+				return node;
+
+			} else return findNonMergedNode( node.parent );
+
+		}
+
+		function retrieveChildren( node ) {
+
+			const children = node.children;
+
+			for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+				const childData = children[ i ].matrixData;
+
+				const found = oldParent.matrixData.removeChild( childData );
+
+				if ( found ) {
+
+					const newParent = findNonMergedNode( node );
+
+				  newParent.matrixData.addChild( childData );
+
+				}
+
+			}
+
+		}
+
+		this.traverse( retrieveChildren );
+
+		// parent becomes a parent of *this* node again (this node was
+		// previously merged into the parent).
+		oldParent.matrixData.addChild( this.matrixData );
+
+	},
+
+	setUpdateMatrixWorldAfter( after ) {
+
+		this.matrixData.updateMatrixWorldAfter = after.bind( this );
+
+	},
+
+	setUpdateMatrixWorldBefore( before ) {
+
+		this.matrixData.updateMatrixWorldBefore = before.bind( this );
+
+	},
 
 	onBeforeRender: function () {},
 	onAfterRender: function () {},
@@ -330,6 +560,7 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 
 			object.parent = this;
 			this.children.push( object );
+			this.matrixData.addChild( object.matrixData );
 
 			object.dispatchEvent( _addedEvent );
 
@@ -363,6 +594,7 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 
 			object.parent = null;
 			this.children.splice( index, 1 );
+			this.matrixData.removeChild( object.matrixData );
 
 			object.dispatchEvent( _removedEvent );
 
@@ -385,6 +617,8 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 		}
 
 		this.children.length = 0;
+		this.matrixData.children.length = 0;
+		this.privateMatrixData.children.length = 0;
 
 		return this;
 
@@ -572,35 +806,7 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 
 	updateMatrixWorld: function ( force ) {
 
-		if ( this.matrixAutoUpdate ) this.updateMatrix();
-
-		if ( this.matrixWorldNeedsUpdate || force ) {
-
-			if ( this.parent === null ) {
-
-				this.matrixWorld.copy( this.matrix );
-
-			} else {
-
-				this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
-
-			}
-
-			this.matrixWorldNeedsUpdate = false;
-
-			force = true;
-
-		}
-
-		// update children
-
-		const children = this.children;
-
-		for ( let i = 0, l = children.length; i < l; i ++ ) {
-
-			children[ i ].updateMatrixWorld( force );
-
-		}
+		this.matrixData.updateMatrixWorld( force );
 
 	},
 
