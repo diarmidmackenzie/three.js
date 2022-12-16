@@ -34,9 +34,10 @@ class PlaneHelper extends Line {
 
 		this.add( new Mesh( geometry2, new MeshBasicMaterial( { color: color, opacity: 0.2, transparent: true, depthWrite: false, toneMapped: false } ) ) );
 
+    this.setUpdateMatrixWorldBefore( this.updateMatrixWorldBefore );
 	}
 
-	updateMatrixWorld( force ) {
+	updateMatrixWorldBefore() {
 
 		let scale = - this.plane.constant;
 
@@ -47,8 +48,6 @@ class PlaneHelper extends Line {
 		this.children[ 0 ].material.side = ( scale < 0 ) ? BackSide : FrontSide; // renderer flips side when determinant < 0; flipping not wanted here
 
 		this.lookAt( this.plane.normal );
-
-		super.updateMatrixWorld( force );
 
 	}
 
