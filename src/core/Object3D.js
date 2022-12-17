@@ -121,6 +121,44 @@ class Object3DMatrixData {
 
 	}
 
+	updateWorldMatrix ( updateParents, updateChildren ) {
+
+		const parent = this.parent;
+
+		if ( updateParents === true && parent !== null ) {
+
+			parent.updateWorldMatrix( true, false );
+
+		}
+
+		if ( this.matrixAutoUpdate ) this.updateMatrix();
+
+		if ( this.parent === null ) {
+
+			this.matrixWorld.copy( this.matrix );
+
+		} else {
+
+			this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
+
+		}
+
+		// update children
+
+		if ( updateChildren === true ) {
+
+			const children = this.children;
+
+			for ( let i = 0, l = children.length; i < l; i ++ ) {
+
+				children[ i ].updateWorldMatrix( false, true );
+
+			}
+
+		}
+
+	}
+
 }
 
 function Object3D() {
@@ -812,39 +850,7 @@ Object3D.prototype = Object.assign( Object.create( EventDispatcher.prototype ), 
 
 	updateWorldMatrix: function ( updateParents, updateChildren ) {
 
-		const parent = this.parent;
-
-		if ( updateParents === true && parent !== null ) {
-
-			parent.updateWorldMatrix( true, false );
-
-		}
-
-		if ( this.matrixAutoUpdate ) this.updateMatrix();
-
-		if ( this.parent === null ) {
-
-			this.matrixWorld.copy( this.matrix );
-
-		} else {
-
-			this.matrixWorld.multiplyMatrices( this.parent.matrixWorld, this.matrix );
-
-		}
-
-		// update children
-
-		if ( updateChildren === true ) {
-
-			const children = this.children;
-
-			for ( let i = 0, l = children.length; i < l; i ++ ) {
-
-				children[ i ].updateWorldMatrix( false, true );
-
-			}
-
-		}
+		this.matrixData.updateWorldMatrix( updateParents, updateChildren )
 
 	},
 
