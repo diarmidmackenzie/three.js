@@ -13,6 +13,8 @@ function Camera() {
 	this.projectionMatrix = new Matrix4();
 	this.projectionMatrixInverse = new Matrix4();
 
+	this.setUpdateMatrixWorldAfter( this.updateMatrixWorldAfter );
+
 }
 
 Camera.prototype = Object.assign( Object.create( Object3D.prototype ), {
@@ -51,9 +53,7 @@ Camera.prototype = Object.assign( Object.create( Object3D.prototype ), {
 
 	},
 
-	updateMatrixWorld: function ( force ) {
-
-		Object3D.prototype.updateMatrixWorld.call( this, force );
+	updateMatrixWorldAfter: function ( force ) {
 
 		this.matrixWorldInverse.copy( this.matrixWorld ).invert();
 
